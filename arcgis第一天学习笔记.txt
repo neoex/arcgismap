@@ -1,0 +1,380 @@
+2019.8.26 今天的目标是掌握、熟悉BaseMap 的加载流程，然后尝试自定义BaseMap 来加载
+高德底图
+
+1.arcgis 数据和试图
+  简单的示例:显示地图
+    Basemap.Type basemapType = Basemap.Type.STREETS_VECTOR;
+          double latitude = 34.09042;
+          double longitude = -118.71511;
+          int levelOfDetail = 11;
+          ArcGISMap map = new ArcGISMap(basemapType, latitude, longitude, levelOfDetail);
+          mMapView.setMap(map);
+  这里的 arcgisMap 表示的就是 数据层 而 mapview 是视图层
+
+  这里的显示地图就分为数据和视图两部分
+
+2.Arcgis 数据 
+  ArcgisMap 属性:baseMap 底图，就是最底下的图
+
+ ArcgisMap 的构造方法
+ ArcgisMap() 默认构造方法 //什么都没加载，空白面板
+ ArcgisMap(SpatialReference spatialReference)//SpatialReference 坐标体系
+ ArcgisMap(BaseMap baseMap)//给定底图
+ ArcGISMap​(String webMapUrl)//加载web地图
+
+ 2.1 BaseMap类 本质上还是图层，这个类提供了很多官网的底图实例
+    构造方法:
+    BaseMap()
+    BaseMap(Layer baseLayer)
+    Basemap​(PortalItem portalItem)//PortalItem 这个玩意儿不太好理解，先不理他
+    Basemap​(Iterable<Layer> baseLayers, Iterable<Layer> referenceLayers)//一系列的图层
+    Basemap​(String webMapUrl)//web地图
+
+如果我们想在arcgismap 里面加载高德，或者谷歌地图，肯定是希望把高德地图当作底图去加载的
+现看看BaseMap() 是怎么加载图层的
+   1.默认的构造函数
+    public Basemap() {
+        this(new CoreBasemap());
+    }
+    发现每个构造方法里面第一步都是先调用这个，CoreBasemap 是跟底层打交道的aidl类
+    大概流程就是先创建CoreBasemap  实例，这个实例里面初始化了一些预置的基础数据
+
+   2.如果直接new BaseMap()去加载那么将会跟不传BaseMap 稍微的不一样，如果不加BaseMap 那么整个地图
+   就什么都没有，加了baseMap 之后就会出现一个灰色的图层
+
+   3.所以 底图其实是 后面加进去的
+     随便找一个 官方创建basemap的方法
+     
+     public static Basemap createStreets() {
+        return a(CoreBasemap.y());
+    }
+
+     private static Basemap a(CoreBasemap var0) {
+        Basemap var1 = new Basemap(var0);
+        if (var1.getLoadStatus() == LoadStatus.LOADED) {
+            var1.a();
+        }
+
+        return var1;
+    }
+    void a() {
+        this.mBaseLayers.a();
+        this.mReferenceLayers.a();
+    }
+    结合 new BaseMap() 其实就是实例化一个coreBaseMap 对象，为后面的添加layer 做准备的
+
+    所以实际加载layer 的操作就是下面这个方法
+    void a() {
+        this.mBaseLayers.a();
+        this.mReferenceLayers.a();
+    }
+    private final LayerList mBaseLayers;
+    private final LayerList mReferenceLayers;
+    在构造方法里面初始化的
+     this.mBaseLayers = new LayerList(this.mCoreBasemap.b());
+     this.mReferenceLayers = new LayerList(this.mCoreBasemap.k());
+
+    这两个都是Layerlist 类型
+    LayerList 的a() 方法
+        void a() {
+        for(int var1 = 0; var1 < this.mListenableListImpl.size(); ++var1) {
+            this.mListenableListImpl.get(var1);
+        }
+    }
+    
+    mListenableListImpl 它的get方法
+      public E get(int index) {
+        Object var2 = null;
+	//同步，让调用它的list 和 a 是一样的
+        this.b();
+	//根据下标去获取
+        var2 = this.a.get(index);
+        CoreElement var3 = null;
+	//如果不存在那么就会创建这个Layer并添加进去
+        if (var2 == null) {
+            try {
+                var3 = this.mCoreVector.b((long)index);
+                var2 = h.a(var3);
+                this.a.set(index, var2);
+            } finally {
+                if (var3 != null) {
+                    var3.cg();
+                }
+
+            }
+        }
+
+        return var2;//返回的是layer类型的
+    }
+
+
+创建图层就是这个方法
+ var2 = h.a(var3);
+ 看了一下这个方法完全没法看，头晕，感觉这里应该是根据不同的参数 生成不同的图层吧(比如卫星底图，
+ 比如矢量图)，全部都是native 的方法，应该没戏了。
+
+
+那么只能从Layer 入手或者从weburl 入手
+
+先看Layer 这个类
+
+ protected Layer(CoreLayer coreLayer) {
+        this.mCoreLayer = coreLayer;
+	//下面这个应该是用来加载数据的
+        this.mLoadableInner = new c(this, coreLayer, new ga() {
+            public void requestRequired(CoreRequest request) {
+	    //看到这个大概就清楚了，这个获取到数据之前会卡在这里，直到获取数据完成
+	    //那么获取数据的方法肯定就在 onRequestRequired()这个方法里面，所以后面
+	    //自定义加载数据这个方法肯定是要重写的
+                ListenableFuture var2 = Layer.this.onRequestRequired(request);
+
+		//下面的request.b() 这个方法点进去看一下就知道是取消监听和释放请求了
+                if (var2 == null) {
+                    request.b();
+                } else {
+		    //这里应该是把获取的数据加载到地图里面
+                    com.esri.arcgisruntime.internal.l.a var3 = new com.esri.arcgisruntime.internal.l.a(request, var2, Layer.this.mPendingRequests);
+                    var3.b();
+                }
+
+            }
+        });
+      
+    }
+//这个方法果然是抽象方法
+protected abstract ListenableFuture<?> onRequestRequired(CoreRequest var1);
+  
+先不着急自定义Layer 看看它的其他已经实现的子类是 如何操作的
+
+1.EncLayer extends Layer   
+-------------------电子海图------------------------
+
+   ENC（电子航海图）层用于渲染数据EncCell。所有ENC图层都将基于渲染EncEnvironmentSettings.DisplaySettings。
+   使用ENC层的示例：
+
+ EncCell encCell = new EncCell("file-path-of-ENC-cell");
+ 
+ EncLayer encLayer = new EncLayer(encCell);
+ 
+ encLayer.addDoneLoadingListener(new Runnable() {
+   public void run() {
+     if (encLayer.getLoadStatus() == LoadStatus.LOADED) {
+       // ENC layer has loaded
+     }
+   }
+ });
+ 
+ map.getOperationalLayers().add(encLayer);
+ 
+ mapView.setMap(map);
+
+ protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+     //直接抛异常的忽略
+        throw new UnsupportedOperationException("Not implemented");
+    }
+2.GroupLayer 同上忽略
+	扩展了Layer
+	表示包含其他图层的图层。组图层有助于在地图或场景中组织相关类型的图层，
+	并可用于定义高级绘图选项。组图层可以嵌套在另一个图层组中。
+	假设有几个要素层都代表不同维度的水特征。例如，井（点），
+	溪流（线）和湖泊（多边形）。GroupLayer提供了将它们视为一个称为“水特征”的图层的功能，
+	即使它们存储为单独的要素图层。
+
+	全程
+
+	这是基于子层中可用的信息异步导出的。这意味着添加或删除子项时，
+	完整范围可能会发生变化。完整范围将位于第一个加载的子图层的空间参考中。
+
+	如果应用想要缩放到组图层，
+	它应该询问子图层加载状态以确定组图层的完整范围是否代表所有图层 -
+	实际上等待所有子图像在放大到组之前加载。
+
+3.IntegratedMeshLayer 
+    表示可以显示集成网格图层的图层。集成网格可以表示构建的和自然的3D特征，
+    例如建筑物墙壁，树木，山谷和悬崖，具有逼真的纹理并包括高程信息
+  protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+	//这里应该是根据request的参数获取图层
+            switch(SyntheticClass_1.a[request.k().ordinal()]) {
+            case 1:
+            case 2:
+                var2 = b.a(request, this);
+                break;
+            default:
+                throw new UnsupportedOperationException("Not implemented");
+            }
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+
+  4.MobileBasemapLayer 这里也是直接抛异常
+
+  表示在移动地图包内的移动地图中找到的矢量底图图层。
+  只有在将底图图层打包到移动地图包中时，
+  才能在ArcGIS Pro中创建此类图层。
+  它可以从多个要素类创建，这些要素类被压缩到单个向量底图中，
+  保留完整的要素和属性信息。
+
+  5.UnknownLayer 忽略
+
+  6.FeatureLayer
+  表示由要素组成的图层; FeatureLayer中的要素包括几何和一组一致的字段。FeatureLayer中的功能可以显示在地图上，查询，编辑和选择（以视觉方式突出显示）。
+  每个FeatureLayer对应一个FeatureTable，它被传递给FeatureLayer构造函数。
+
+      protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+            if (!(request instanceof dz) && !(request instanceof cv)) {
+                throw new UnsupportedOperationException("Not implemented");
+            }
+	   // 
+            var2 = com.esri.arcgisruntime.internal.l.b.a(request, new com.esri.arcgisruntime.internal.e.c(request.h(), (Credential)null, (RequestConfiguration)null));
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+
+ 7.KmlLayer 加载kml 的图层 KmlLayer提供KML文档的只读视图，不允许创作或编辑。
+      protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+            switch(SyntheticClass_1.a[request.k().ordinal()]) {
+            case 1:
+                var2 = b.a(request, new com.esri.arcgisruntime.internal.e.c(request.h(), (Credential)null, (RequestConfiguration)null));
+                break;
+            default:
+                throw new UnsupportedOperationException("Not implemented");
+            }
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+ 8.ArcGISVectorTiledLayer 
+   表示允许您显示ArcGIS Vector Tile Service，Vector Tile Style Sheet
+   或Local Vector tile包（VTPK）中的数据的图层。
+
+   protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+            if (!(request instanceof dz)) {
+                throw new UnsupportedOperationException("Not implemented");
+            }
+
+            var2 = b.a(request, this);
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+ 9.PointCloudLayer
+
+ 表示可以显示点云图层的图层。点云层可快速显示大量符号化和过滤的点云数据。
+ 它们针对显示和共享多种传感器数据进行了优化，包括激光雷达。
+
+     protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+            switch(SyntheticClass_1.a[request.k().ordinal()]) {
+            case 1:
+            case 2:
+                var2 = b.a(request, this);
+                break;
+            default:
+                throw new UnsupportedOperationException("Not implemented");
+            }
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+10.AnnotationLayer 
+
+   表示用于可视化注释的图层，类似于FeatureLayer可视化要素的方式。
+   注释是一种功能，由包含位置，布局和样式的文本组成。注记图层与要素图层的不同之处在于它们具有：
+
+   专用文本符号渲染器（即用户无法选择或更改渲染器）
+   图层的参考比例（而不是使用地图的参考比例）
+
+   protected ListenableFuture<?> onRequestRequired(CoreRequest request) {
+        ListenableFuture var2 = null;
+
+        try {
+            if (!(request instanceof dz)) {
+                throw new UnsupportedOperationException("Not implemented");
+            }
+
+            var2 = b.a(request, this);
+        } catch (Exception var4) {
+            request.a((byte[])null, var4);
+        }
+
+        return var2;
+    }
+
+11.ImageAdjustmentLayer 抽象类 
+   此类的方法允许更改图层图像的亮度，对比度和伽玛。
+ 
+12.ArcGISSceneLayer 显示3d图层
+	
+ ArcGISScene scene = new ArcGISScene(Basemap.createImagery());
+
+ //creating a layer using a URL from a scene service
+ ArcGISSceneLayer sceneLayer = new ArcGISSceneLayer(
+   "http://scene.arcgis.com/arcgis/rest/services/Hosted/Buildings_San_Francisco/SceneServer/layers/0");
+ scene.getOperationalLayers().add(sceneLayer);
+
+ SceneView view = new SceneView();
+ view.setArcGISScene(scene);
+
+ 13.FeatureCollectionLayer
+表示可以显示a的要素的图层FeatureCollection。该层聚合一个或多个子层，每个子层负责显示来自个体 FeatureCollectionTable的特征FeatureCollection。这些子图层中的每一个都可以包含具有不同GeometryType的要素。
+
+-----------------------------分割线-----------------------------------------
+ImageAdjustmentLayer 它的子类{
+	//基本上是按照这个来写吧
+	ImageTiledLayer：显示缓存映射的图层的基类。您通常会使用此类的一个或多个子类。
+	RasterLayer：用于加载栅格数据
+	ArcGISMapImageLayer：ArcGISMapImageLayer是从包含一个或多个子图层的动态地图服务创建的。
+		     由ArcGISMapImageLayer调用的地图服务从源数据动态地渲染地图图像，
+		     并应用服务中指定的渲染信息。这些服务还可以支持图层渲染的修改，
+		     允许运行时更改图层的外观。所做的任何更改都是临时的，
+		     并且不会保留回服务。
+		     地图服务的URL将传递到构造函数中。
+	 WmsLayer：代表开放地理空间联盟（OGC）Web地图服务（WMS）层。
+		     该服务可以在ArcGIS Online上的云中，
+		     第三方服务器上或ArcGIS Server的内部部署中托管。
+  }
+
+  ImageTiledLayer的实现子类
+
+  ServiceImageTiledLayer 用于显示服务切片的图层的基类
+  WmtsLayer 定义开放地理空间联盟（OGC）Web地图平铺服务（WMTS）层。
+  ArcGISTiledLayer 表示一个图层，允许您使用预生成的图块显示ArcGIS Map服务中的数据。
+  ---------------------------------------------------------------
+  值得研究的:
+  1.)IntegratedMeshLayer
+  2.)FeatureLayer
+  3.)KmlLayer
+  4.)ArcGISVectorTiledLayer
+  5.)PointCloudLayer
+  6.)AnnotationLayer
+  7.)ServiceImageTiledLayer 还是个抽象的！！ 
+
+今天就先按照 ServiceImageTiledLayer 来加载切片图层吧，只要重写geturl 的方法即可，非常简单
+后续如果需要离线缓存图片，就要去重写onRequestRequired 这个方法，在里面加上磁盘缓存了，其他的
+都不用动，加磁盘缓存明天在写
