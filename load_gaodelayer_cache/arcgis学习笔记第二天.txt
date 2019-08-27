@@ -1,0 +1,39 @@
+
+知识点总结:
+1.通过重写getTileUrl将高德地图当作底图加载进来，但是还没实现离线切片的磁盘保存
+既然是serviceLayer 肯定是要从网络上获取数据，简单查看一下源码就知道这个请求最终是
+要返回 ListenableFuture<byte[]> 对象，那么接口肯定返回的是一个byte[] 对象，如果不考虑
+arcgis 对这些请求可能做的一些优化的话，我们完全可以用自己的网络封装库去请求这个数据，
+然后做缓存
+2.断点的时候发现,它的网络请求是并发执行的，所以一般的网络库将 schedules.io() 这个当作网络请求
+的线程就不合适了
+3.关于缓存 是一个byte[] 对象，其实是一张图片来的，之前做过切片的应该知道那个getTileUrl 其实返回
+的是一张图片
+4.源码
+顶级父类Layer 对象
+protected Layer(CoreLayer coreLayer) {
+        this.mCoreLayer = coreLayer;
+        this.mLoadableInner = new c(this, coreLayer, new ga() {
+            public void requestRequired(CoreRequest request) {
+	    //简直不用猜，这个肯定是发请求的地方
+	    //var2 这个变量只是一个局部变量，
+	    //它的生命周期在请求结束返回数据的时候也将消亡
+                ListenableFuture var2 = Layer.this.onRequestRequired(request);
+                if (var2 == null) {
+                    request.b();
+                } else {
+                    com.esri.arcgisruntime.internal.l.a var3 = new com.esri.arcgisruntime.internal.l.a(request, var2, Layer.this.mPendingRequests);
+                    var3.b();
+                }
+
+            }
+        });
+    }
+5.我们要做的就是 onRequestRequired 重写这个方法，让它返回一个ListenableFuture 对象
+//CacheUtils 这个是一个开源通用lib库里面的，缓存()
+  byte[] bytes = CacheUtils.getCache(getFileName(Tilekey));
+  if(bytes == null){
+	bytes = NetWorkUtils.getFromNetWork(requestUrl);
+	CacheUtils.putInCache(getFileName(Tilekey),bytes)
+  }
+  return bytes;
