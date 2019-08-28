@@ -1,0 +1,47 @@
+1.去除水印
+   /**这个只用调用一次，只要在使用arcgis 之前调用就好了，注册一个开发者账号*/
+   ArcGISRuntimeEnvironment
+   .setLicense("runtimelite,1000,rud8300236646,none,3M2PMD17JYEJ2B3TR202");
+ 2.去除下面的文字
+     mapView.setAttributionTextVisible(false);
+ 3.开启定位LocationDisplay
+   示例:
+   locationDisplay = mapView.getLocationDisplay（）;
+   locationDisplay.setAutoPanMode（LocationDisplay.AutoPanMode.NAVIGATION）;
+   locationDisplay.startAsync（）;
+   知识点
+   1.)pingAnimation 接收位置更新时显示的动画，可以关闭
+
+   2.) LocationDisplay.AutoPanMode RECENTER
+     当位置符号移动到“漫游范围”之外时，通过重新居中位置符号来保持位置符号。
+     该位置可以在漂移范围内自由移动，但是一旦该位置退出漂移范围，
+     MapView就会将该地图重新定位在该符号上。在LocationDisplay.getDefaultSymbol()
+     用于指示设备的位置。
+     漫游范围被设置为MapView范围的一个因子。默认情况下，漂移范围因子为0.5，
+     表示范围大小的一半，但您可以使用更改其值LocationDisplay.setWanderExtentFactor(float)。
+     ----------重点，改变可见地图范围会重置为OFF（拖动地图）-----------
+     如果用户以交互方式或通过编程导航方法导航地图来更改可见地图范围，
+     则会导致AutoPanMode重置为OFF。但是，如果用户双击或捏合以仅缩放地图，
+     则在地图放大或缩小时，AutoPanMode将保持为RECENTER，从而允许用户在此模式下轻松缩放地图。
+
+   3.)LocationDisplay.AutoPanMode NAVIGATION
+      最适合车载导航，位置符号固定在屏幕上的特定点，并始终指向屏幕顶部。
+      MapView根据位置更新和设备行进方向（而不是COMPASS_NAVIGATION模式中的磁北）来平移和旋转地图。
+      因此，位置符号显示为静止并始终指向屏幕顶部，而其下方的地图似乎正在移动和旋转。
+      位置符号相对于MapView底边的位置设置为MapView高度的一个因子。默认情况下，
+      符号显示为MapView上方距离的1/8（因子为0.125），但您可以通过调用来更改此值
+      LocationDisplay.setNavigationPointHeightFactor(float)。
+
+    4.)LocationDisplay.AutoPanMode COMPASS_NAVIGATION
+       当用户步行时，最适合航点导航，位置符号固定在屏幕上的特定点，并始终指向设备的顶部边缘。
+       MapView根据位置更新和设备相对于磁北的航向（与导航模式下的行进方向相反）平移和旋转地图。
+       该地图反映了当用户围绕其位置转动时用户前方的内容。位置符号相对于MapView底边的位置
+       设置为MapView高度的一个因子。默认情况下，符号显示为MapView上方距离的1/8（因子为0.125），
+       但您可以通过调用来更改此值LocationDisplay.setNavigationPointHeightFactor(float)。
+
+   注意:
+    1.)在程序进入后台时需要locationDisplay.stop(),进入前台时需要调用
+    locationDisplay.startAsync()开启位置更新
+    2.)不支持单独的网络定位，如果需要支持单独网络定位，需要自己实现LocationDataSource 参照
+    AndroidLocationDataSource 添加passive provider即可
+    3.)拖动地图会将autopanmode 重置为off
